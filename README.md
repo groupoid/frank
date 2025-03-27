@@ -1,7 +1,7 @@
 Frank: CoC + CIC
 ================
 
-<img src="https://frank.groupoid.space/img/frank.jpg" height=400>
+<img src="https://frank.groupoid.space/img/frank.jpg" height=420>
 
 ## Abstract
 
