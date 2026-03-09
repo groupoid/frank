@@ -57,6 +57,12 @@ defmodule Frank.Codegen do
     {:tuple, 1, [{:integer, 1, j} | Enum.map(args, &generate_expr/1)]}
   end
 
+  defp generate_expr(%AST.Let{decls: _decls, body: body}) do
+    # Simplified: just return the body term.
+    # Real implementation needs named funs for recursiveness or match blocks.
+    generate_expr(body)
+  end
+
   # Ind is the hard part - it's basically a recursive function application.
   defp generate_expr(%AST.Ind{cases: _cases, term: t}) do
     # Simplified: just return the term.

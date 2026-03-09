@@ -21,9 +21,18 @@ defmodule Frank.Parser do
       [{:module, _, _} | rest] ->
         case parse_module_name(rest) do
           {:ok, name, [{:where, _, _} | rest2]} ->
-            case parse_decls(rest2, []) do
+            # Skip optional v_left_brace after where
+            rest3 = Enum.drop_while(rest2, fn t -> elem(t, 0) == :v_left_brace end)
+
+            case parse_decls(rest3, []) do
               {:ok, decls, remaining} ->
                 {:ok, %AST.Module{name: name, declarations: decls}, remaining}
+
+              {:error, _} = err ->
+                err
+
+              {:error, _, _} = err ->
+                err
             end
 
           _ ->
@@ -46,14 +55,21 @@ defmodule Frank.Parser do
   defp parse_module_name_tail(rest, acc), do: {:ok, acc, rest}
 
   defp parse_decls([], acc), do: {:ok, Enum.reverse(acc), []}
+  defp parse_decls([{:v_left_brace, _, _} | rest], acc), do: parse_decls(rest, acc)
   defp parse_decls([{:v_right_brace, _, _} | rest], acc), do: {:ok, Enum.reverse(acc), rest}
   defp parse_decls([{:v_semicolon, _, _} | rest], acc), do: parse_decls(rest, acc)
 
   defp parse_decls(tokens, acc) do
-    case parse_decl(tokens) do
-      {:ok, decl, rest} -> parse_decls(rest, [decl | acc])
-      {:error, _} = err -> err
-      _ -> {:ok, Enum.reverse(acc), tokens}
+    # Proactively skip semicolons before parse_decl
+    tokens = Enum.drop_while(tokens, fn t -> elem(t, 0) == :v_semicolon end)
+
+    if tokens == [] or elem(hd(tokens), 0) == :v_right_brace do
+      {:ok, Enum.reverse(acc), tokens}
+    else
+      case parse_decl(tokens) do
+        {:ok, decl, rest} -> parse_decls(rest, [decl | acc])
+        err when elem(err, 0) == :error -> err
+      end
     end
   end
 
@@ -80,12 +96,47 @@ defmodule Frank.Parser do
     end
   end
 
+  defp parse_decl([{:import, _, _} | rest]) do
+    case parse_module_name(rest) do
+      {:ok, name, rest2} -> {:ok, {:import, name}, rest2}
+      _ -> {:error, :invalid_import}
+    end
+  end
+
   defp parse_decl([{:ident, _, _, name} | rest]) do
     case parse_binders(rest, []) do
       {:ok, binders, [{:=, _, _} | rest2]} ->
         case parse_expr(rest2) do
           {:ok, expr, rest3} ->
-            {:ok, %AST.DeclValue{name: name, binders: binders, expr: expr}, rest3}
+            # Check for where block
+            case rest3 do
+              [{:where, _, _} | rest4] ->
+                rest5 = Enum.drop_while(rest4, fn t -> elem(t, 0) == :v_left_brace end)
+
+                case parse_decls(rest5, []) do
+                  {:ok, where_decls, rest6} ->
+                    # parse_decls stops at v_right_brace, consume it
+                    remaining = Enum.drop_while(rest6, fn t -> elem(t, 0) == :v_right_brace end)
+
+                    {:ok,
+                     %AST.DeclValue{
+                       name: name,
+                       binders: binders,
+                       expr: expr,
+                       where_decls: where_decls
+                     }, remaining}
+
+                  err ->
+                    err
+                end
+
+              _ ->
+                {:ok, %AST.DeclValue{name: name, binders: binders, expr: expr, where_decls: []},
+                 rest3}
+            end
+
+          err ->
+            err
         end
 
       _ ->
@@ -111,16 +162,21 @@ defmodule Frank.Parser do
   defp parse_type_params(tokens, acc), do: {:ok, Enum.reverse(acc), tokens}
 
   defp parse_constructors(tokens, acc) do
-    case tokens do
-      [{:pipe, _, _} | rest] ->
-        parse_constructors(rest, acc)
-
-      _ ->
-        case parse_constructor(tokens) do
-          {:ok, constr, rest2} -> parse_constructors(rest2, [constr | acc])
-          _ -> {:ok, Enum.reverse(acc), tokens}
-        end
+    case parse_constructor(tokens) do
+      {:ok, constr, rest} -> parse_constructors_tail(rest, [constr | acc])
+      _ -> {:ok, Enum.reverse(acc), tokens}
     end
+  end
+
+  defp parse_constructors_tail([{:pipe, _, _} | rest], acc) do
+    case parse_constructor(rest) do
+      {:ok, constr, rest2} -> parse_constructors_tail(rest2, [constr | acc])
+      _ -> {:error, :expected_constructor_after_pipe}
+    end
+  end
+
+  defp parse_constructors_tail(tokens, acc) do
+    {:ok, Enum.reverse(acc), tokens}
   end
 
   defp parse_constructor([{:ident, _, _, name} | rest]) do
@@ -134,7 +190,7 @@ defmodule Frank.Parser do
   defp parse_constructor(tokens), do: {:error, :no_constructor, Enum.take(tokens, 5)}
 
   defp parse_type(tokens) do
-    case parse_type_atom(tokens) do
+    case parse_type_app(tokens) do
       {:ok, t, [{:arrow, _, _} | rest]} ->
         case parse_type(rest) do
           {:ok, t2, rest2} -> {:ok, %AST.Pi{name: "_", domain: t, codomain: t2}, rest2}
@@ -146,16 +202,51 @@ defmodule Frank.Parser do
     end
   end
 
-  defp parse_type_atom([{:ident, _, _, name} | rest]), do: {:ok, %AST.Var{name: name}, rest}
-
-  defp parse_type_atom([{:left_paren, _, _} | rest]) do
-    case parse_type(rest) do
-      {:ok, t, [{:right_paren, _, _} | rest2]} -> {:ok, t, rest2}
+  defp parse_type_app(tokens) do
+    case parse_type_atom(tokens) do
+      {:ok, t, rest} -> parse_type_app_tail(t, rest)
       err -> err
     end
   end
 
-  defp parse_type_atom(tokens), do: {:error, :no_type_atom, Enum.take(tokens, 5)}
+  defp parse_type_app_tail(f, tokens) do
+    case parse_type_atom(tokens) do
+      {:ok, arg, rest} -> parse_type_app_tail(%AST.App{func: f, arg: arg}, rest)
+      _ -> {:ok, f, tokens}
+    end
+  end
+
+  defp parse_type_atom([{:ident, _, _, name} | rest]), do: {:ok, %AST.Var{name: name}, rest}
+
+  defp parse_type_atom([{:left_paren, _, _}, {:ident, _, _, _name}, {:colon, _, _} | rest]) do
+    case parse_type(rest) do
+      {:ok, t, [{:right_paren, _, _} | rest2]} ->
+        {:ok, t, rest2}
+
+      err ->
+        err
+    end
+  end
+
+  defp parse_type_atom([{:left_paren, _, _} | rest] = tokens) do
+    case parse_type(rest) do
+      {:ok, t, [{:right_paren, _, _} | rest2]} ->
+        {:ok, t, rest2}
+
+      _ ->
+        case parse_expr_atom(tokens) do
+          {:ok, e, rest2} -> {:ok, e, rest2}
+          err -> err
+        end
+    end
+  end
+
+  defp parse_type_atom(tokens) do
+    case parse_expr_atom(tokens) do
+      {:ok, e, rest} -> {:ok, e, rest}
+      _ -> {:error, :no_type_atom, Enum.take(tokens, 5)}
+    end
+  end
 
   defp parse_type_atoms(tokens, acc) do
     case parse_type_atom(tokens) do
@@ -217,6 +308,7 @@ defmodule Frank.Parser do
   defp parse_branches([{:v_left_brace, _, _} | rest], acc), do: parse_branches(rest, acc)
   defp parse_branches([{:v_right_brace, _, _} | rest], acc), do: {:ok, Enum.reverse(acc), rest}
   defp parse_branches([{:v_semicolon, _, _} | rest], acc), do: parse_branches(rest, acc)
+  defp parse_branches([{:semicolon, _, _} | rest], acc), do: parse_branches(rest, acc)
 
   defp parse_branches(tokens, acc) do
     case parse_branch(tokens) do
@@ -244,6 +336,8 @@ defmodule Frank.Parser do
       _ -> {:ok, %AST.Var{name: name}, rest}
     end
   end
+
+  defp parse_pattern(tokens), do: {:error, :expected_pattern, Enum.take(tokens, 5)}
 
   defp parse_patterns_atom(tokens, acc) do
     case parse_pattern_atom(tokens) do

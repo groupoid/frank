@@ -10,7 +10,7 @@ defmodule Frank.AST do
   end
 
   defmodule DeclValue do
-    defstruct [:name, :binders, :expr, :guards]
+    defstruct [:name, :binders, :expr, :guards, :where_decls]
   end
 
   defmodule DeclTypeSignature do
@@ -57,6 +57,10 @@ defmodule Frank.AST do
 
   defmodule Inductive do
     defstruct [:name, :params, :level, :constrs]
+  end
+
+  defmodule Let do
+    defstruct [:decls, :body]
   end
 
   # Constructor implementation: index, inductive definition, and arguments

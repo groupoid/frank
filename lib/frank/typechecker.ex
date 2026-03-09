@@ -140,10 +140,23 @@ defmodule Frank.Typechecker do
     end
   end
 
+  def reduce(e, %AST.Let{decls: decls, body: body}) do
+    new_defs =
+      Enum.reduce(decls, e.defs, fn {n, expr}, acc ->
+        Map.put(acc, n, expr)
+      end)
+
+    reduce(%{e | defs: new_defs}, body)
+  end
+
   def reduce(e, %AST.Var{name: name}) do
+    # IO.puts("Looking up: #{name}")
     case Map.get(e.defs, name) do
-      nil -> %AST.Var{name: name}
-      term -> reduce(e, term)
+      nil ->
+        %AST.Var{name: name}
+
+      term ->
+        reduce(e, term)
     end
   end
 
@@ -202,6 +215,11 @@ defmodule Frank.Typechecker do
     %AST.App{func: subst(x, s, f), arg: subst(x, s, arg)}
   end
 
+  def subst(x, s, %AST.Let{decls: decls, body: body}) do
+    new_decls = Enum.map(decls, fn {name, expr} -> {name, subst(x, s, expr)} end)
+    %AST.Let{decls: new_decls, body: subst(x, s, body)}
+  end
+
   def subst(x, s, %AST.Ind{inductive: d, motive: p, cases: cases, term: t}) do
     # Also subst in inductive params if needed
     %AST.Ind{
@@ -210,6 +228,10 @@ defmodule Frank.Typechecker do
       cases: Enum.map(cases, &subst(x, s, &1)),
       term: subst(x, s, t)
     }
+  end
+
+  def subst(x, s, %AST.Constr{index: i, inductive: d, args: args}) do
+    %AST.Constr{index: i, inductive: d, args: Enum.map(args, &subst(x, s, &1))}
   end
 
   def subst(_, _, t), do: t

@@ -32,9 +32,8 @@ defmodule Mix.Tasks.Frank.Base do
             File.write!(beam_path, bin)
             IO.puts("OK")
 
-          {:error, reason} ->
+          {:error, _reason} ->
             IO.puts("FAILED")
-            IO.inspect(reason)
         end
       end
     end)

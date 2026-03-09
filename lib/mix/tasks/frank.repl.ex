@@ -31,7 +31,8 @@ defmodule Mix.Tasks.Frank.Repl do
             IO.puts("Loaded: #{mod_name}")
             new_env
 
-          _ ->
+          {:error, err} ->
+            IO.puts("Error loading #{mod_name}: #{inspect(err)}")
             acc_env
         end
       end)
@@ -96,6 +97,7 @@ defmodule Mix.Tasks.Frank.Repl do
             %AST.DeclValue{} = v, {d_acc, t_acc} ->
               current_env = %{env | defs: d_acc, env: t_acc}
               desugared_v = Desugar.desugar_decl(v, current_env)
+              IO.puts("  Defining: #{desugared_v.name}")
               {Map.put(d_acc, desugared_v.name, desugared_v.expr), t_acc}
 
             %AST.DeclData{} = data, {d_acc, t_acc} ->

@@ -1,17 +1,32 @@
 defmodule Frank.Desugar do
   alias Frank.AST
 
-  def desugar(%AST.Module{declarations: decls} = m, env \\ %{}) do
+  def desugar(%AST.Module{declarations: decls} = m, env \\ %Frank.Typechecker.Env{}) do
     # Pass env to desugar_decl if needed, though for now only REPL uses it
     %AST.Module{m | declarations: Enum.map(decls, &desugar_decl(&1, env))}
   end
 
-  def desugar_decl(decl, env \\ %{})
+  def desugar_decl(decl, env \\ %Frank.Typechecker.Env{})
 
-  def desugar_decl(%AST.DeclValue{name: name, binders: binders, expr: expr}, env) do
+  def desugar_decl(
+        %AST.DeclValue{name: name, binders: binders, expr: expr, where_decls: where_decls},
+        env
+      ) do
+    # Desugar local where_decls first
+    desugared_where = Enum.map(where_decls || [], &desugar_decl(&1, env))
+
+    # Convert to Let if there are any where_decls
+    expr_with_where =
+      if desugared_where == [] do
+        expr
+      else
+        decls_list = Enum.map(desugared_where, fn d -> {d.name, d.expr} end)
+        %AST.Let{decls: decls_list, body: expr}
+      end
+
     # Transform f x y = e into f = \x -> \y -> e
     body =
-      Enum.reduce(Enum.reverse(binders), desugar_expression(expr, env, name), fn
+      Enum.reduce(Enum.reverse(binders), desugar_expression(expr_with_where, env, name), fn
         %AST.Var{name: vn}, acc ->
           %AST.Lam{name: vn, domain: %AST.Universe{level: 0}, body: acc}
       end)
@@ -49,18 +64,22 @@ defmodule Frank.Desugar do
 
       %AST.Case{expr: e, branches: branches} ->
         # Find inductive type from the first branch
-        {first_pat, _} = hd(branches)
-
         ind =
-          case first_pat do
-            %AST.BinderConstructor{name: cname} ->
-              # Search in env.env for an inductive that has this constructor
-              Enum.find_value(Map.values(env.env), fn ind ->
-                if Enum.any?(ind.constrs, fn {_, name, _} -> name == cname end), do: ind
-              end)
+          if branches == [] do
+            %AST.Inductive{name: "Empty", params: [], level: 0, constrs: []}
+          else
+            {first_pat, _} = hd(branches)
 
-            _ ->
-              nil
+            case first_pat do
+              %AST.BinderConstructor{name: cname} ->
+                # Search in env.env for an inductive that has this constructor
+                Enum.find_value(Map.values(env.env), fn ind ->
+                  if Enum.any?(ind.constrs, fn {_, name, _} -> name == cname end), do: ind
+                end)
+
+              _ ->
+                nil
+            end
           end
 
         # Fallback to Nat if not found (for the demo)
@@ -103,14 +122,15 @@ defmodule Frank.Desugar do
                   %AST.BinderConstructor{args: args} when args != [] ->
                     Enum.reduce(Enum.reverse(args), desugar_expression(body, env, func_name), fn
                       %AST.Var{name: k}, acc ->
+                        ih_name = "ih_#{k}"
                         # Recursive call replacement
-                        acc_with_ih = replace_recursion(acc, func_name, k)
+                        acc_with_ih = replace_recursion(acc, func_name, k, ih_name)
 
                         %AST.Lam{
                           name: k,
                           domain: %AST.Universe{level: 0},
                           body: %AST.Lam{
-                            name: "ih",
+                            name: ih_name,
                             domain: %AST.Universe{level: 0},
                             body: acc_with_ih
                           }
@@ -140,19 +160,28 @@ defmodule Frank.Desugar do
           arg: desugar_expression(arg, env, func_name)
         }
 
+      %AST.Let{decls: decls, body: let_body} ->
+        decls_desugared =
+          Enum.map(decls, fn {n, e} ->
+            {n, desugar_expression(e, env, n)}
+          end)
+
+        %AST.Let{
+          decls: decls_desugared,
+          body: desugar_expression(let_body, env, func_name)
+        }
+
       _ ->
         expr
     end
   end
 
-  defp replace_recursion(expr, nil, _k), do: expr
-
-  defp replace_recursion(expr, func_name, k) do
+  defp replace_recursion(expr, func_name, k, ih_name) do
     # Try to match (func_name ... k ...)
     case expr do
       # Match f k
       %AST.App{func: %AST.Var{name: ^func_name}, arg: %AST.Var{name: ^k}} ->
-        %AST.Var{name: "ih"}
+        %AST.Var{name: ih_name}
 
       # Match (f (g x)) y -> (ih x)
       %AST.App{
@@ -162,20 +191,20 @@ defmodule Frank.Desugar do
         },
         arg: _
       } ->
-        %AST.App{func: %AST.Var{name: "ih"}, arg: arg}
+        %AST.App{func: %AST.Var{name: ih_name}, arg: arg}
 
       # Match (f x) k
       %AST.App{func: %AST.App{func: %AST.Var{name: ^func_name}, arg: _x}, arg: %AST.Var{name: ^k}} ->
-        %AST.Var{name: "ih"}
+        %AST.Var{name: ih_name}
 
       # Match (f k) y
       %AST.App{func: %AST.App{func: %AST.Var{name: ^func_name}, arg: %AST.Var{name: ^k}}, arg: _y} ->
-        %AST.Var{name: "ih"}
+        %AST.Var{name: ih_name}
 
       %AST.App{func: f, arg: arg} ->
         %AST.App{
-          func: replace_recursion(f, func_name, k),
-          arg: replace_recursion(arg, func_name, k)
+          func: replace_recursion(f, func_name, k, ih_name),
+          arg: replace_recursion(arg, func_name, k, ih_name)
         }
 
       _ ->
