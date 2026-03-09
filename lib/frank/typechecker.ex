@@ -5,9 +5,11 @@ defmodule Frank.Typechecker do
   Typing environment contains:
   - env: map of (name -> inductive)
   - ctx: list of (name, type)
+  - defs: map of (name -> term)
+  - deadline: monotonic time limit in ms
   """
   defmodule Env do
-    defstruct env: %{}, ctx: [], defs: %{}
+    defstruct env: %{}, ctx: [], defs: %{}, deadline: nil
   end
 
   def infer(%Env{} = e, %AST.Var{name: name}) do
@@ -26,17 +28,14 @@ defmodule Frank.Typechecker do
   end
 
   def infer(%Env{} = e, %AST.Constr{index: j, inductive: d, args: args}) do
-    {^j, ty} = List.keyfind(d.constrs, j, 0)
+    {^j, _name, ty} = Enum.find(d.constrs, fn {idx, _, _} -> idx == j end)
     ty_subst = subst_many(d.params, ty)
     infer_ctor(e, ty_subst, args)
   end
 
   def infer(%Env{} = e, %AST.Ind{inductive: _d, motive: p, cases: _cases, term: t}) do
     _t_ty = infer(e, t)
-    # Check if t_ty is the inductive type d applied to its params
-    # This is a simplified check for now
     %AST.Pi{name: x, domain: _a, codomain: b} = p
-    # result type is motive applied to t
     subst(x, t, b)
   end
 
@@ -47,7 +46,6 @@ defmodule Frank.Typechecker do
   end
 
   def infer(%Env{} = e, %AST.Lam{name: x, domain: domain, body: body}) do
-    # check(e, domain, ...)
     %AST.Pi{name: x, domain: domain, codomain: infer(%{e | ctx: [{x, domain} | e.ctx]}, body)}
   end
 
@@ -84,16 +82,17 @@ defmodule Frank.Typechecker do
   end
 
   def normalize(e, t) do
+    deadline = e.deadline || System.monotonic_time(:millisecond) + 60_000
+    e = %{e | deadline: deadline}
     t_red = reduce(e, t)
 
     case t_red do
       %AST.App{func: f, arg: arg} ->
-        # After reducing the application as much as possible,
-        # we recursively normalize the parts.
         %AST.App{func: normalize(e, f), arg: normalize(e, arg)}
 
       %AST.Lam{name: x, domain: a, body: b} ->
-        %AST.Lam{name: x, domain: normalize(e, a), body: normalize(e, b)}
+        # Use WHNF: don't normalize the body to avoid infinite recursion
+        %AST.Lam{name: x, domain: normalize(e, a), body: b}
 
       %AST.Pi{name: x, domain: a, codomain: b} ->
         %AST.Pi{name: x, domain: normalize(e, a), codomain: normalize(e, b)}
@@ -114,26 +113,28 @@ defmodule Frank.Typechecker do
     end
   end
 
-  def reduce(e, t, fuel \\ 2000)
+  def reduce(e, t, fuel \\ 50_000)
 
   def reduce(_e, t, 0) do
     raise "Out of fuel reducing: #{inspect(t, limit: 20)}"
   end
 
-  def reduce(e, %AST.App{func: f, arg: arg}, fuel) do
+  def reduce(e, t, fuel) do
+    if e.deadline && System.monotonic_time(:millisecond) > e.deadline do
+      raise "Timeout reducing: #{inspect(t, limit: 20)}"
+    end
+
+    do_reduce(e, t, fuel)
+  end
+
+  defp do_reduce(e, %AST.App{func: f, arg: arg}, fuel) do
     f_red = reduce(e, f, fuel - 1)
 
     case f_red do
       %AST.Lam{name: x, body: body} ->
-        # Beta reduction: (\x -> body) arg => reduce(body[x := arg])
-        # Lazy expansion: don't reduce arg yet
         reduce(e, subst(x, arg, body), fuel - 1)
 
       %AST.Constr{index: i, inductive: d, args: args} ->
-        # Constr applied to arg: collect the argument
-        # Constr arguments must be evaluated to ensure structural matching works?
-        # Actually, for debugging, let's keep them unreduced if possible,
-        # but Ind needs them reduced to match. So reduce it.
         arg_red = reduce(e, arg, fuel - 1)
         %AST.Constr{index: i, inductive: d, args: args ++ [arg_red]}
 
@@ -142,53 +143,83 @@ defmodule Frank.Typechecker do
     end
   end
 
-  def reduce(e, %AST.Ind{inductive: _d, motive: _p, cases: cases, term: t} = ind, fuel) do
+  defp do_reduce(e, %AST.Ind{inductive: ind_def, motive: _p, cases: cases, term: t} = ind, fuel) do
     case reduce(e, t, fuel - 1) do
       %AST.Constr{index: j, args: args} ->
+        # Find the constructor's Pi type signature to trace which arguments are recursive
+        {^j, _cname, c_sig} = Enum.find(ind_def.constrs, fn {idx, _, _} -> idx == j end)
+
         case_val = Enum.at(cases, j - 1)
-        res = apply_args(e, case_val, args, ind)
-        # Result of Ind could be another reducible term
+        res = apply_args(e, case_val, args, c_sig, ind)
         reduce(e, res, fuel - 1)
 
-      _reduced_t ->
+      _ ->
         ind
     end
   end
 
-  def reduce(e, %AST.Let{decls: decls, body: body}, fuel) do
-    new_defs =
-      Enum.reduce(decls, e.defs, fn {n, expr}, acc ->
-        Map.put(acc, n, expr)
-      end)
-
+  defp do_reduce(e, %AST.Let{decls: decls, body: body}, fuel) do
+    new_defs = Enum.reduce(decls, e.defs, fn {n, expr}, acc -> Map.put(acc, n, expr) end)
     reduce(%{e | defs: new_defs}, body, fuel - 1)
   end
 
-  def reduce(e, %AST.Var{name: name}, fuel) do
+  defp do_reduce(e, %AST.Var{name: name}, fuel) do
     case Map.get(e.defs, name) do
-      nil ->
-        %AST.Var{name: name}
-
-      term ->
-        # Recursively reduce looked up term
-        reduce(e, term, fuel - 1)
+      nil -> %AST.Var{name: name}
+      term -> reduce(e, term, fuel - 1)
     end
   end
 
-  def reduce(_e, t, _fuel), do: t
+  defp do_reduce(_e, t, _fuel), do: t
 
-  defp apply_args(_e, f, [], _ind), do: f
+  defp apply_args(_e, f, [], _ty_sig, _ind), do: f
 
-  defp apply_args(e, f, [arg | rest], %AST.Ind{} = ind) do
-    # For each arg, if it's of the inductive type, the case expects (arg, ih)
-    # CURRENT Desugarer always generates \k -> \ih binders for EVERY argument.
-    # So we MUST pass an IH for every argument.
+  defp apply_args(e, f, [arg | rest], ty_sig, %AST.Ind{} = ind) do
+    # Extract domain of current argument from constructor signature
+    {arg_domain, next_sig} =
+      case ty_sig do
+        %AST.Pi{domain: d, codomain: c} -> {d, c}
+        _ -> {nil, ty_sig}
+      end
+
+    ind_name = ind.inductive.name
+
+    is_inductive =
+      case arg_domain do
+        %AST.Var{name: ^ind_name} -> true
+        %AST.App{func: %AST.Var{name: ^ind_name}} -> true
+        %AST.Pi{codomain: %AST.Var{name: ^ind_name}} -> true
+        %AST.Pi{codomain: %AST.App{func: %AST.Var{name: ^ind_name}}} -> true
+        _ -> false
+      end
+
     f_next = %AST.App{func: f, arg: arg}
 
-    # Desugarer: \k -> \ih -> ...
-    ih = %AST.Ind{ind | term: arg}
-    f_with_ih = %AST.App{func: f_next, arg: ih}
-    apply_args(e, f_with_ih, rest, ind)
+    ih =
+      if is_inductive do
+        case arg_domain do
+          %AST.Pi{name: x, domain: a} ->
+            # Functional induction: \x -> Ind(ind.term = arg x)
+            %AST.Lam{
+              name: x,
+              domain: a,
+              body: %AST.Ind{ind | term: %AST.App{func: arg, arg: %AST.Var{name: x}}}
+            }
+
+          _ ->
+            # Basic induction
+            %AST.Ind{ind | term: arg}
+        end
+      else
+        # Not an inductive argument, but Desugarer might still expect a placeholder binder?
+        # Actually, Frank Desugarer only generates IH binders for identified recursive calls.
+        # Wait, the Desugarer: Enum.reduce(binders, body, ...) wraps EVERYTHING in Lam(k, Lam(ih, ...))
+        # if the constructor was defined with args.
+        # So we MUST pass an IH placeholder if it's not inductive.
+        %AST.Var{name: "unused_ih"}
+      end
+
+    apply_args(e, %AST.App{func: f_next, arg: ih}, rest, next_sig, ind)
   end
 
   def subst_many(params, ty) do
@@ -208,29 +239,22 @@ defmodule Frank.Typechecker do
     end)
   end
 
-  def subst(x, s, %AST.Var{name: name}) do
-    if name == x, do: s, else: %AST.Var{name: name}
-  end
+  def subst(x, s, %AST.Var{name: name}), do: if(name == x, do: s, else: %AST.Var{name: name})
 
   def subst(x, s, %AST.Pi{name: n, domain: a, codomain: b}) do
-    if n == x do
-      %AST.Pi{name: n, domain: subst(x, s, a), codomain: b}
-    else
-      %AST.Pi{name: n, domain: subst(x, s, a), codomain: subst(x, s, b)}
-    end
+    if n == x,
+      do: %AST.Pi{name: n, domain: subst(x, s, a), codomain: b},
+      else: %AST.Pi{name: n, domain: subst(x, s, a), codomain: subst(x, s, b)}
   end
 
   def subst(x, s, %AST.Lam{name: n, domain: a, body: b}) do
-    if n == x do
-      %AST.Lam{name: n, domain: subst(x, s, a), body: b}
-    else
-      %AST.Lam{name: n, domain: subst(x, s, a), body: subst(x, s, b)}
-    end
+    if n == x,
+      do: %AST.Lam{name: n, domain: subst(x, s, a), body: b},
+      else: %AST.Lam{name: n, domain: subst(x, s, a), body: subst(x, s, b)}
   end
 
-  def subst(x, s, %AST.App{func: f, arg: arg}) do
-    %AST.App{func: subst(x, s, f), arg: subst(x, s, arg)}
-  end
+  def subst(x, s, %AST.App{func: f, arg: arg}),
+    do: %AST.App{func: subst(x, s, f), arg: subst(x, s, arg)}
 
   def subst(x, s, %AST.Let{decls: decls, body: body}) do
     new_decls = Enum.map(decls, fn {name, expr} -> {name, subst(x, s, expr)} end)
@@ -238,7 +262,6 @@ defmodule Frank.Typechecker do
   end
 
   def subst(x, s, %AST.Ind{inductive: d, motive: p, cases: cases, term: t}) do
-    # Also subst in inductive params if needed
     %AST.Ind{
       inductive: d,
       motive: subst(x, s, p),

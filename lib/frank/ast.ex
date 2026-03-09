@@ -114,8 +114,13 @@ defmodule Frank.AST do
 
         "#{f_str} #{a_str}"
 
-      %Inductive{name: name} ->
-        name
+      %Inductive{name: name, params: params} ->
+        if params == [] do
+          name
+        else
+          params_str = Enum.map_join(params, " ", fn {n, _} -> n end)
+          "(#{name} #{params_str})"
+        end
 
       %Constr{index: i, inductive: d, args: args} ->
         # Try to find constructor name from inductive definition
@@ -128,11 +133,19 @@ defmodule Frank.AST do
         if args == [] do
           name
         else
-          "#{name} (" <> Enum.map_join(args, " ", &Frank.AST.to_string/1) <> ")"
+          "(#{name} " <> Enum.map_join(args, " ", &Frank.AST.to_string/1) <> ")"
         end
 
-      %Ind{inductive: d} ->
-        "Ind(#{d.name})"
+      %Ind{inductive: d, term: t} ->
+        "ind_#{d.name}(#{Frank.AST.to_string(t)})"
+
+      %Let{decls: decls, body: body} ->
+        decls_str =
+          Enum.map_join(decls, "; ", fn {name, expr} ->
+            "#{name} = #{Frank.AST.to_string(expr)}"
+          end)
+
+        "let #{decls_str} in #{Frank.AST.to_string(body)}"
 
       _ ->
         inspect(term)

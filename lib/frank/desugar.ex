@@ -209,18 +209,20 @@ defmodule Frank.Desugar do
       %AST.Var{name: ^func_name} ->
         # Search for induction var `k` in args, or `k arg` (subtree recursion)
         case find_recursion_arg(args, k) do
-          {:val, _before, after_args} ->
-            # Case: (func_name ... k) ...
-            # Replace (func_name ... k) with ih_name
-            # Then recurse and apply to remaining arguments
-            ih_var = %AST.Var{name: ih_name}
+          {:val, before_args, after_args} ->
+            # Case: (func_name ...before... k) ...after...
+            # Replace with (ih_name ...before...) ...after...
+            ih_app = build_app(%AST.Var{name: ih_name}, before_args)
             replaced_after = Enum.map(after_args, &replace_recursion(&1, func_name, k, ih_name))
-            build_app(ih_var, replaced_after)
+            build_app(ih_app, replaced_after)
 
-          {:subtree, subtree_arg, _before, after_args} ->
-            # Case: (func_name ... (k subtree_arg)) ...
-            # Replace (func_name ... (k subtree_arg)) with (ih_name subtree_arg)
-            ih_app = %AST.App{func: %AST.Var{name: ih_name}, arg: subtree_arg}
+          {:subtree, subtree_arg, before_args, after_args} ->
+            # Case: (func_name ...before... (k subtree_arg)) ...after...
+            # Replace with (ih_name ...before... subtree_arg) ...after...
+            # Note: in W-types, (f tt) is the subtree.
+            # Usually ih_f is mapped to \before... -> \subtree -> ...
+            ih_with_before = build_app(%AST.Var{name: ih_name}, before_args)
+            ih_app = %AST.App{func: ih_with_before, arg: subtree_arg}
             replaced_after = Enum.map(after_args, &replace_recursion(&1, func_name, k, ih_name))
             build_app(ih_app, replaced_after)
 
@@ -279,12 +281,12 @@ defmodule Frank.Desugar do
     |> Enum.find_value(:not_found, fn {arg, i} ->
       case arg do
         %AST.Var{name: ^k} ->
-          {_before, after_args} = Enum.split(args, i + 1)
-          {:val, [], after_args}
+          {before_args, [_k_var | after_args]} = Enum.split(args, i)
+          {:val, before_args, after_args}
 
         %AST.App{func: %AST.Var{name: ^k}, arg: subtree} ->
-          {_before, after_args} = Enum.split(args, i + 1)
-          {:subtree, subtree, [], after_args}
+          {before_args, [_subtree_app | after_args]} = Enum.split(args, i)
+          {:subtree, subtree, before_args, after_args}
 
         _ ->
           nil
