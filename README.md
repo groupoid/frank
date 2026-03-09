@@ -355,6 +355,36 @@ Context: []
 [12]. J.-Y. Girard. Interprétation fonctionnelle et élimination des coupures. 1972. <br>
 [13]. Thierry Coquand, Gerard Huet. <a href="https://core.ac.uk/download/pdf/82038778.pdf">The Calculus of Constructions</a>. 1988.<br>
 
+## REPL
+
+The Frank REPL provides an interactive environment for evaluating expressions. You can import modules from the base library and evaluate Peano arithmetic or list operations.
+
+```
+% mix frank.repl
+Frank REPL (simplified)
+
+frank> import Prelude
+OK
+
+frank> import Data.Nat
+OK
+
+frank> plus (Succ Zero) (Succ (Succ Zero))
+Result: Succ (Succ (Succ Zero))
+
+frank> mult (Succ (Succ Zero)) (Succ (Succ Zero))
+Result: Succ (Succ (Succ (Succ Zero)))
+
+frank> import Data.List
+OK
+
+frank> length (Cons (Succ Zero) Nil)
+Result: Succ Zero
+
+frank> append (Cons Zero Nil) (Cons (Succ Zero) Nil)
+Result: Cons Zero (Cons (Succ Zero) Nil)
+```
+
 ## Author
 
 Namdak Tonpa
