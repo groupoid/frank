@@ -1,4 +1,4 @@
-|| List datatype for Frank
+-- List datatype for Frank
 
 module Data.List where
 
@@ -27,3 +27,31 @@ filter p l = case l of
     Cons x xs -> case p x of
         True  -> Cons x (filter p xs)
         False -> filter p xs
+-- concat flattens a List of Lists
+concat l = case l of
+    Nil -> Nil
+    Cons xs xss -> append xs (concat xss)
+
+-- drop removes first n elements
+drop n l = case n of
+    Zero -> l
+    Succ k -> case l of
+        Nil -> Nil
+        Cons x xs -> drop k xs
+
+-- zipWith combines two lists using a binary function
+zipWith f l1 l2 = case l1 of
+    Nil -> Nil
+    Cons x xs -> case l2 of
+        Nil -> Nil
+        Cons y ys -> Cons (f x y) (zipWith f xs ys)
+
+-- foldr is the standard right fold
+foldr f acc l = case l of
+    Nil -> acc
+    Cons x xs -> f x (foldr f acc xs)
+
+-- foldl is the standard left fold
+foldl f acc l = case l of
+    Nil -> acc
+    Cons x xs -> foldl f (f acc x) xs

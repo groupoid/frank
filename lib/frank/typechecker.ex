@@ -114,58 +114,75 @@ defmodule Frank.Typechecker do
     end
   end
 
-  def reduce(e, %AST.App{func: f, arg: arg}) do
-    f_red = reduce(e, f)
+  def reduce(e, t, fuel \\ 2000)
+
+  def reduce(_e, t, 0) do
+    raise "Out of fuel reducing: #{inspect(t, limit: 20)}"
+  end
+
+  def reduce(e, %AST.App{func: f, arg: arg}, fuel) do
+    f_red = reduce(e, f, fuel - 1)
 
     case f_red do
       %AST.Lam{name: x, body: body} ->
         # Beta reduction: (\x -> body) arg => reduce(body[x := arg])
-        reduce(e, subst(x, arg, body))
+        # Lazy expansion: don't reduce arg yet
+        reduce(e, subst(x, arg, body), fuel - 1)
+
+      %AST.Constr{index: i, inductive: d, args: args} ->
+        # Constr applied to arg: collect the argument
+        # Constr arguments must be evaluated to ensure structural matching works?
+        # Actually, for debugging, let's keep them unreduced if possible,
+        # but Ind needs them reduced to match. So reduce it.
+        arg_red = reduce(e, arg, fuel - 1)
+        %AST.Constr{index: i, inductive: d, args: args ++ [arg_red]}
 
       _ ->
         %AST.App{func: f_red, arg: arg}
     end
   end
 
-  def reduce(e, %AST.Ind{inductive: _d, motive: _p, cases: cases, term: t} = ind) do
-    case reduce(e, t) do
+  def reduce(e, %AST.Ind{inductive: _d, motive: _p, cases: cases, term: t} = ind, fuel) do
+    case reduce(e, t, fuel - 1) do
       %AST.Constr{index: j, args: args} ->
         case_val = Enum.at(cases, j - 1)
         res = apply_args(e, case_val, args, ind)
         # Result of Ind could be another reducible term
-        reduce(e, res)
+        reduce(e, res, fuel - 1)
 
-      _ ->
+      _reduced_t ->
         ind
     end
   end
 
-  def reduce(e, %AST.Let{decls: decls, body: body}) do
+  def reduce(e, %AST.Let{decls: decls, body: body}, fuel) do
     new_defs =
       Enum.reduce(decls, e.defs, fn {n, expr}, acc ->
         Map.put(acc, n, expr)
       end)
 
-    reduce(%{e | defs: new_defs}, body)
+    reduce(%{e | defs: new_defs}, body, fuel - 1)
   end
 
-  def reduce(e, %AST.Var{name: name}) do
-    # IO.puts("Looking up: #{name}")
+  def reduce(e, %AST.Var{name: name}, fuel) do
     case Map.get(e.defs, name) do
       nil ->
         %AST.Var{name: name}
 
       term ->
-        reduce(e, term)
+        # Recursively reduce looked up term
+        reduce(e, term, fuel - 1)
     end
   end
 
-  def reduce(_e, t), do: t
+  def reduce(_e, t, _fuel), do: t
 
   defp apply_args(_e, f, [], _ind), do: f
 
   defp apply_args(e, f, [arg | rest], %AST.Ind{} = ind) do
     # For each arg, if it's of the inductive type, the case expects (arg, ih)
+    # CURRENT Desugarer always generates \k -> \ih binders for EVERY argument.
+    # So we MUST pass an IH for every argument.
     f_next = %AST.App{func: f, arg: arg}
 
     # Desugarer: \k -> \ih -> ...

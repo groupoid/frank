@@ -127,7 +127,7 @@ defmodule Mix.Tasks.Frank.Repl do
     end)
   end
 
-  defp make_constr_term(idx, ind, ty, vars) do
+  def make_constr_term(idx, ind, ty, vars) do
     case ty do
       %AST.Pi{name: x, domain: a, codomain: b} ->
         name = if x == "_", do: "a#{length(vars)}", else: x

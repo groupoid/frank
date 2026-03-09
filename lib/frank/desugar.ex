@@ -2,8 +2,33 @@ defmodule Frank.Desugar do
   alias Frank.AST
 
   def desugar(%AST.Module{declarations: decls} = m, env \\ %Frank.Typechecker.Env{}) do
-    # Pass env to desugar_decl if needed, though for now only REPL uses it
-    %AST.Module{m | declarations: Enum.map(decls, &desugar_decl(&1, env))}
+    desugared_decls =
+      Enum.map(decls, fn decl ->
+        case decl do
+          %AST.DeclData{} -> desugar_decl(decl, env)
+          _ -> decl
+        end
+      end)
+
+    ind_map =
+      Enum.reduce(desugared_decls, %{}, fn decl, acc ->
+        case decl do
+          %AST.Inductive{name: n} = ind -> Map.put(acc, n, ind)
+          _ -> acc
+        end
+      end)
+
+    # Merge into env
+    env_with_types = %{env | env: Map.merge(env.env, ind_map)}
+
+    %AST.Module{
+      m
+      | declarations:
+          Enum.map(desugared_decls, fn
+            %AST.Inductive{} = d -> d
+            d -> desugar_decl(d, env_with_types)
+          end)
+    }
   end
 
   def desugar_decl(decl, env \\ %Frank.Typechecker.Env{})
@@ -177,38 +202,93 @@ defmodule Frank.Desugar do
   end
 
   defp replace_recursion(expr, func_name, k, ih_name) do
-    # Try to match (func_name ... k ...)
-    case expr do
-      # Match f k
-      %AST.App{func: %AST.Var{name: ^func_name}, arg: %AST.Var{name: ^k}} ->
-        %AST.Var{name: ih_name}
+    # Flatten application tree: (((f arg1) arg2) arg3) -> {f, [arg1, arg2, arg3]}
+    {f_node, args} = flatten_app(expr, [])
 
-      # Match (f (g x)) y -> (ih x)
-      %AST.App{
-        func: %AST.App{
-          func: %AST.Var{name: ^func_name},
-          arg: %AST.App{func: %AST.Var{name: ^k}, arg: arg}
-        },
-        arg: _
-      } ->
-        %AST.App{func: %AST.Var{name: ih_name}, arg: arg}
+    case f_node do
+      %AST.Var{name: ^func_name} ->
+        # Search for induction var `k` in args, or `k arg` (subtree recursion)
+        case find_recursion_arg(args, k) do
+          {:val, _before, after_args} ->
+            # Case: (func_name ... k) ...
+            # Replace (func_name ... k) with ih_name
+            # Then recurse and apply to remaining arguments
+            ih_var = %AST.Var{name: ih_name}
+            replaced_after = Enum.map(after_args, &replace_recursion(&1, func_name, k, ih_name))
+            build_app(ih_var, replaced_after)
 
-      # Match (f x) k
-      %AST.App{func: %AST.App{func: %AST.Var{name: ^func_name}, arg: _x}, arg: %AST.Var{name: ^k}} ->
-        %AST.Var{name: ih_name}
+          {:subtree, subtree_arg, _before, after_args} ->
+            # Case: (func_name ... (k subtree_arg)) ...
+            # Replace (func_name ... (k subtree_arg)) with (ih_name subtree_arg)
+            ih_app = %AST.App{func: %AST.Var{name: ih_name}, arg: subtree_arg}
+            replaced_after = Enum.map(after_args, &replace_recursion(&1, func_name, k, ih_name))
+            build_app(ih_app, replaced_after)
 
-      # Match (f k) y
-      %AST.App{func: %AST.App{func: %AST.Var{name: ^func_name}, arg: %AST.Var{name: ^k}}, arg: _y} ->
-        %AST.Var{name: ih_name}
-
-      %AST.App{func: f, arg: arg} ->
-        %AST.App{
-          func: replace_recursion(f, func_name, k, ih_name),
-          arg: replace_recursion(arg, func_name, k, ih_name)
-        }
+          :not_found ->
+            # Recursive call not found in this App, recurse on arguments
+            replaced_args = Enum.map(args, &replace_recursion(&1, func_name, k, ih_name))
+            build_app(f_node, replaced_args)
+        end
 
       _ ->
-        expr
+        case expr do
+          %AST.App{func: func, arg: arg} ->
+            %AST.App{
+              func: replace_recursion(func, func_name, k, ih_name),
+              arg: replace_recursion(arg, func_name, k, ih_name)
+            }
+
+          %AST.Lam{name: name, domain: domain, body: body} ->
+            %AST.Lam{
+              name: name,
+              domain: replace_recursion(domain, func_name, k, ih_name),
+              body: replace_recursion(body, func_name, k, ih_name)
+            }
+
+          %AST.Case{expr: e, branches: branches} ->
+            %AST.Case{
+              expr: replace_recursion(e, func_name, k, ih_name),
+              branches:
+                Enum.map(branches, fn {p, b} ->
+                  {p, replace_recursion(b, func_name, k, ih_name)}
+                end)
+            }
+
+          _ ->
+            expr
+        end
     end
+  end
+
+  defp flatten_app(%AST.App{func: f, arg: arg}, acc) do
+    flatten_app(f, [arg | acc])
+  end
+
+  defp flatten_app(other, acc) do
+    {other, acc}
+  end
+
+  defp build_app(f, []), do: f
+
+  defp build_app(f, [arg | rest]) do
+    build_app(%AST.App{func: f, arg: arg}, rest)
+  end
+
+  defp find_recursion_arg(args, k) do
+    Enum.with_index(args)
+    |> Enum.find_value(:not_found, fn {arg, i} ->
+      case arg do
+        %AST.Var{name: ^k} ->
+          {_before, after_args} = Enum.split(args, i + 1)
+          {:val, [], after_args}
+
+        %AST.App{func: %AST.Var{name: ^k}, arg: subtree} ->
+          {_before, after_args} = Enum.split(args, i + 1)
+          {:subtree, subtree, [], after_args}
+
+        _ ->
+          nil
+      end
+    end)
   end
 end

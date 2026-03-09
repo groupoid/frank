@@ -1,4 +1,4 @@
-|| Frank Samples ported from frank.ml
+-- Frank Samples ported from frank.ml
 
 module Samples where
 
@@ -16,14 +16,14 @@ data Empty =
 
 data Unit = tt
 
-|| W-types
+-- W-types
 data W A B = Sup (x:A) (f:B x -> W A B)
 
-|| Nat as W-type
-|| A = Bool, B False = Empty, B True = Unit
+-- Nat as W-type
+-- A = Bool, B False = Empty, B True = Unit
 data WNat = WNat (W Bool (\b -> case b of False -> Empty; True -> Unit))
 
 zero_w = Sup False (\e -> case e of)
 succ_w n = Sup True (\u -> n)
 
-|| to_nat_w w = ... (requires more complex induction handling)
+-- to_nat_w w = ... (requires more complex induction handling)

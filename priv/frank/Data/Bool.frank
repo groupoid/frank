@@ -1,4 +1,4 @@
-|| Boolean datatype for Frank
+-- Boolean datatype for Frank
 
 module Data.Bool where
 

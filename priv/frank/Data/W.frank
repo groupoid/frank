@@ -1,4 +1,4 @@
-|| W-types (well-founded trees) for Frank
+-- W-types (well-founded trees) for Frank
 
 module Data.W where
 

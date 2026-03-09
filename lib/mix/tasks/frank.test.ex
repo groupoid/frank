@@ -17,9 +17,8 @@ defmodule Mix.Tasks.Frank.Test do
             IO.puts("OK (#{mod})")
             :ok
 
-          {:error, reason} ->
+          {:error, _reason} ->
             IO.puts("FAILED")
-            IO.inspect(reason)
             :error
         end
       end)

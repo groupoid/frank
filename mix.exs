@@ -3,16 +3,16 @@ defmodule Frank.MixProject do
 
   def project do
     [
-      app: :frank,
+      app: :christine,
       version: "0.3.9",
-      description: "The Frank Programming Language",
+      description: "The Christine Programming Language",
       deps: deps(),
       package: package()
     ]
   end
 
   def application do
-    [extra_applications: [:logger]]
+    [ extra_applications: [ :logger ] ]
   end
 
   def deps do
@@ -26,8 +26,9 @@ defmodule Frank.MixProject do
       files: ["lib", "priv", "src", "test", "LICENSE", "README.md"],
       licenses: ["ISC"],
       maintainers: ["Namdak Tonpa"],
-      name: :frank,
-      links: %{"GitHub" => "https://github.com/synrc/frank"}
+      name: :christine,
+      links: %{"GitHub" => "https://github.com/synrc/christine"}
     ]
   end
+
 end

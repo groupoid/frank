@@ -14,8 +14,8 @@ defmodule Frank.Lexer do
   defp lex([?\r | rest], line, col, acc), do: lex(rest, line, col, acc)
   defp lex([?\t | rest], line, col, acc), do: lex(rest, line, col + 4, acc)
 
-  # Comments (Miranda style ||)
-  defp lex([?|, ?| | rest], line, col, acc) do
+  # Comments (PureScript/Haskell style --)
+  defp lex([?-, ?- | rest], line, col, acc) do
     rest2 = Enum.drop_while(rest, fn c -> c != ?\n end)
     lex(rest2, line, col, acc)
   end

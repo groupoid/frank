@@ -1,5 +1,5 @@
-|| W-defined Nat addition for Frank
-|| Test for 2 + 1
+-- W-defined Nat addition for Frank
+-- Test for 2 + 1
 
 module Test.W where
 
@@ -18,5 +18,5 @@ wplus m n = case m of
         False -> n
         True  -> succ_w (wplus (f tt) n)
 
-|| Test case: 2 + 1
+-- Test case: 2 + 1
 test_W = wplus wTwo wOne

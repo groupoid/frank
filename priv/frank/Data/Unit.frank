@@ -1,4 +1,4 @@
-|| Unit datatype for Frank
+-- Unit datatype for Frank
 
 module Data.Unit where
 

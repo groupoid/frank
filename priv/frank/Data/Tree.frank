@@ -1,4 +1,4 @@
-|| Tree datatype for Frank
+-- Tree datatype for Frank
 
 module Data.Tree where
 

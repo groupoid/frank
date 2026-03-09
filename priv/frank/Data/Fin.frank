@@ -1,4 +1,4 @@
-|| Finite sets for Frank
+-- Finite sets for Frank
 
 module Data.Fin where
 
