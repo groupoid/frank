@@ -1,4 +1,7 @@
 defmodule Frank.AST do
+  import Kernel, except: [to_string: 1]
+  alias Frank.AST
+
   @moduledoc """
   Abstract Syntax Tree structures for the Frank compiler.
   """
@@ -93,25 +96,16 @@ defmodule Frank.AST do
         "U#{l}"
 
       %Pi{name: x, domain: a, codomain: b} ->
-        "(#{x} : #{Frank.AST.to_string(a)}) -> #{Frank.AST.to_string(b)}"
+        domain_str = if complex?(a), do: "(#{to_string(a)})", else: to_string(a)
+        "(#{x} : #{domain_str}) -> #{to_string(b)}"
 
       %Lam{name: x, body: b} ->
-        "\\#{x} -> #{Frank.AST.to_string(b)}"
+        "\\#{x} -> #{to_string(b)}"
 
       %App{func: f, arg: a} ->
-        f_str =
-          case f do
-            %Lam{} -> "(#{Frank.AST.to_string(f)})"
-            _ -> Frank.AST.to_string(f)
-          end
-
-        a_str =
-          case a do
-            %App{} -> "(#{Frank.AST.to_string(a)})"
-            %Lam{} -> "(#{Frank.AST.to_string(a)})"
-            _ -> Frank.AST.to_string(a)
-          end
-
+        # f a b ...
+        f_str = if binds_tightly?(f), do: to_string(f), else: "(#{to_string(f)})"
+        a_str = if complex?(a), do: "(#{to_string(a)})", else: to_string(a)
         "#{f_str} #{a_str}"
 
       %Inductive{name: name, params: params} ->
@@ -123,7 +117,6 @@ defmodule Frank.AST do
         end
 
       %Constr{index: i, inductive: d, args: args} ->
-        # Try to find constructor name from inductive definition
         name =
           case Enum.find(d.constrs, fn {idx, _, _} -> idx == i end) do
             {_, n, _} -> n
@@ -133,22 +126,42 @@ defmodule Frank.AST do
         if args == [] do
           name
         else
-          "(#{name} " <> Enum.map_join(args, " ", &Frank.AST.to_string/1) <> ")"
+          args_str =
+            Enum.map_join(args, " ", fn arg ->
+              if complex?(arg), do: "(#{to_string(arg)})", else: to_string(arg)
+            end)
+
+          "(#{name} #{args_str})"
         end
 
       %Ind{inductive: d, term: t} ->
-        "ind_#{d.name}(#{Frank.AST.to_string(t)})"
+        "ind_#{d.name}(#{to_string(t)})"
 
       %Let{decls: decls, body: body} ->
         decls_str =
           Enum.map_join(decls, "; ", fn {name, expr} ->
-            "#{name} = #{Frank.AST.to_string(expr)}"
+            "#{name} = #{to_string(expr)}"
           end)
 
-        "let #{decls_str} in #{Frank.AST.to_string(body)}"
+        "let #{decls_str} in #{to_string(body)}"
 
       _ ->
         inspect(term)
     end
   end
+
+  defp complex?(%App{}), do: true
+  defp complex?(%Lam{}), do: true
+  defp complex?(%Pi{}), do: true
+  defp complex?(%Let{}), do: true
+  defp complex?(%Ind{}), do: true
+  defp complex?(%Constr{args: [_ | _]}), do: true
+  defp complex?(_), do: false
+
+  # App func only needs parens if it's a binder or complex operator
+  defp binds_tightly?(%Var{}), do: true
+  defp binds_tightly?(%App{}), do: true
+  defp binds_tightly?(%Constr{args: []}), do: true
+  defp binds_tightly?(%Inductive{params: []}), do: true
+  defp binds_tightly?(_), do: false
 end
