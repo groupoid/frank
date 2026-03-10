@@ -1,6 +1,5 @@
 defmodule Frank.AST do
   import Kernel, except: [to_string: 1]
-  alias Frank.AST
 
   @moduledoc """
   Abstract Syntax Tree structures for the Frank compiler.
@@ -164,4 +163,13 @@ defmodule Frank.AST do
   defp binds_tightly?(%Constr{args: []}), do: true
   defp binds_tightly?(%Inductive{params: []}), do: true
   defp binds_tightly?(_), do: false
+
+  # --- Type/Term Utilities ---
+
+  def pi(name, domain, codomain), do: %Pi{name: name, domain: domain, codomain: codomain}
+  def arrow(a, b), do: %Pi{name: "_", domain: a, codomain: b}
+  def universe(i), do: %Universe{level: i}
+  def nat(), do: %Var{name: "Nat"}
+  def bool(), do: %Var{name: "Bool"}
+  def unit(), do: %Var{name: "Unit"}
 end

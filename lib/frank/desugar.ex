@@ -107,22 +107,14 @@ defmodule Frank.Desugar do
             end
           end
 
-        # Fallback to Nat if not found (for the demo)
+        # Fallback if not found
         ind =
           ind ||
             %AST.Inductive{
-              name: "Nat",
+              name: "Unknown",
               params: [],
               level: 0,
-              constrs: [
-                {1, "Zero", %AST.Var{name: "Nat"}},
-                {2, "Succ",
-                 %AST.Pi{
-                   name: "_",
-                   domain: %AST.Var{name: "Nat"},
-                   codomain: %AST.Var{name: "Nat"}
-                 }}
-              ]
+              constrs: []
             }
 
         desugared_target = desugar_expression(e, env, func_name)

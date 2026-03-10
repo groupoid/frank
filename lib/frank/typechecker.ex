@@ -9,7 +9,7 @@ defmodule Frank.Typechecker do
   - deadline: monotonic time limit in ms
   """
   defmodule Env do
-    defstruct env: %{}, ctx: [], defs: %{}, deadline: nil
+    defstruct env: %{}, ctx: [], defs: %{}, name_to_mod: %{}, deadline: nil
   end
 
   def infer(%Env{} = e, %AST.Var{name: name}) do
