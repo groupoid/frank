@@ -74,6 +74,20 @@ test_W = wplus wTwo wOne
         </section>
 
         <section>
+            <h2>Intro</h2>
+
+            <div style="max-width:720px;margin:0 auto;">
+The type checker operates over a term syntax comprising:
+1) Universe i: Type universes with level i ∈ ℕ.
+2) Pi (x, A, B): Dependent function, where A : Universe i and B : Universe j under <nobr>x : A</nobr>.
+   Lam (x, A, t): Lambda abstraction with totality enforced. App (f, a): Function application.
+3) Inductive d: Inductive types with intros Constr and eliminator Ind.
+The typing judgment Γ ⊢ t : T is defined via infer and check functions, with definitional equality Γ ⊢ t = t' implemented via equal.
+            </div>
+
+        </section>
+
+        <section>
             <h2>Syntax</h2>
 
             <div style="max-width:720px;margin:0 auto;">
@@ -92,19 +106,6 @@ type term =
 
         </section>
 
-        <section>
-            <h2>Intro</h2>
-
-            <div style="max-width:720px;margin:0 auto;">
-The type checker operates over a term syntax comprising:
-1) Universe i: Type universes with level i ∈ ℕ.
-2) Pi (x, A, B): Dependent function, where A : Universe i and B : Universe j under <nobr>x : A</nobr>.
-   Lam (x, A, t): Lambda abstraction with totality enforced. App (f, a): Function application.
-3) Inductive d: Inductive types with intros Constr and eliminator Ind.
-The typing judgment Γ ⊢ t : T is defined via infer and check functions, with definitional equality Γ ⊢ t = t' implemented via equal.
-            </div>
-
-        </section>
 
         <section>
             <h2>Semantics</h2>
