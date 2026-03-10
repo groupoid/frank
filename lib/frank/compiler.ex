@@ -8,24 +8,50 @@ defmodule Frank.Compiler do
     with {:ok, tokens} <- Lexer.lex(source),
          resolved <- Layout.resolve(tokens),
          {:ok, ast, _rest} <- Parser.parse(resolved) do
-      # Resolve imports to build the environment
       env = resolve_imports(ast, %Frank.Typechecker.Env{}, opts)
-      # Add current module names to env.name_to_mod
       env = collect_local_names(ast, env)
-      # Desugar using the enriched environment
       desugared = Desugar.desugar(ast, env)
+      final_env = populate_local_env(desugared, env)
+      typecheck_res =
+        if Keyword.get(opts, :typecheck, true) do
+          case Frank.Typechecker.check_module(desugared, final_env) do
+            :ok -> :ok
+            {:error, reason} -> {:error, {:type_error, reason}}
+          end
+        else
+          :ok
+        end
 
-      with {:ok, forms} <- Codegen.generate(desugared, env) do
-        # Typechecking is integrated in the pipeline or done before codegen
-        # For now, we assume desugared AST is typechecked or will be
-        case :compile.forms(forms, [:return_errors, :debug_info]) do
-          {:ok, mod, bin} -> {:ok, mod, bin}
-          {:error, errors, warnings} -> {:error, {:erl_compile, errors, warnings}}
+      if typecheck_res == :ok and Keyword.get(opts, :check_only, false) do
+        {:ok, desugared.name, :check_only}
+      else
+        with :ok <- typecheck_res,
+             {:ok, forms} <- Codegen.generate(desugared, env) do
+          case :compile.forms(forms, [:return_errors, :debug_info]) do
+            {:ok, mod, bin} -> {:ok, mod, bin}
+            {:error, errors, warnings} -> {:error, {:erl_compile, errors, warnings}}
+          end
         end
       end
     else
       {:error, _} = err -> err
     end
+  end
+
+  defp populate_local_env(%AST.Module{name: _mod_name, declarations: decls}, env) do
+    Enum.reduce(decls, env, fn
+      %AST.DeclValue{name: n, expr: e}, acc ->
+        ty = Frank.Typechecker.infer(acc, e)
+        %{acc | defs: Map.put(acc.defs, n, e), ctx: [{n, ty} | acc.ctx]}
+
+      %AST.Inductive{} = ind, acc ->
+        acc = %{acc | env: Map.put(acc.env, ind.name, ind)}
+        acc = %{acc | defs: add_constructors(ind, acc.defs)}
+        %{acc | ctx: add_constructors_to_ctx(ind, acc.ctx)}
+
+      _, acc ->
+        acc
+    end)
   end
 
   defp collect_local_names(%AST.Module{name: mod_name, declarations: decls}, env) do
@@ -81,23 +107,41 @@ defmodule Frank.Compiler do
           env_with_imports = resolve_imports(mod, env, opts)
 
           # 2. Add declarations of the current module to env
-          {new_defs, new_types, new_names} =
+          {new_defs, new_types, new_names, new_ctx} =
             Enum.reduce(
               mod.declarations,
-              {env_with_imports.defs, env_with_imports.env, env_with_imports.name_to_mod},
+              {env_with_imports.defs, env_with_imports.env, env_with_imports.name_to_mod,
+               env_with_imports.ctx},
               fn
-                %AST.DeclValue{} = v, {d_acc, t_acc, n_acc} ->
-                  current_env = %{env_with_imports | defs: d_acc, env: t_acc, name_to_mod: n_acc}
+                %AST.DeclValue{} = v, {d_acc, t_acc, n_acc, c_acc} ->
+                  current_env = %{
+                    env_with_imports
+                    | defs: d_acc,
+                      env: t_acc,
+                      name_to_mod: n_acc,
+                      ctx: c_acc
+                  }
+
                   desugared_v = Desugar.desugar_decl(v, current_env)
+                  val_ty = Frank.Typechecker.infer(current_env, desugared_v.expr)
 
                   {Map.put(d_acc, desugared_v.name, desugared_v.expr), t_acc,
-                   Map.put(n_acc, desugared_v.name, mod_name)}
+                   Map.put(n_acc, desugared_v.name, mod_name),
+                   [{desugared_v.name, val_ty} | c_acc]}
 
-                %AST.DeclData{} = data, {d_acc, t_acc, n_acc} ->
-                  current_env = %{env_with_imports | defs: d_acc, env: t_acc, name_to_mod: n_acc}
+                %AST.DeclData{} = data, {d_acc, t_acc, n_acc, c_acc} ->
+                  current_env = %{
+                    env_with_imports
+                    | defs: d_acc,
+                      env: t_acc,
+                      name_to_mod: n_acc,
+                      ctx: c_acc
+                  }
+
                   desugared_ind = Desugar.desugar_decl(data, current_env)
                   new_t_acc = Map.put(t_acc, desugared_ind.name, desugared_ind)
                   new_d_acc = add_constructors(desugared_ind, d_acc)
+                  new_c_acc = add_constructors_to_ctx(desugared_ind, c_acc)
 
                   n_acc2 = Map.put(n_acc, desugared_ind.name, mod_name)
 
@@ -106,14 +150,21 @@ defmodule Frank.Compiler do
                       Map.put(a, cn, mod_name)
                     end)
 
-                  {new_d_acc, new_t_acc, n_acc3}
+                  {new_d_acc, new_t_acc, n_acc3, new_c_acc}
 
                 _, acc ->
                   acc
               end
             )
 
-          {:ok, %{env_with_imports | defs: new_defs, env: new_types, name_to_mod: new_names}}
+          {:ok,
+           %{
+             env_with_imports
+             | defs: new_defs,
+               env: new_types,
+               name_to_mod: new_names,
+               ctx: new_ctx
+           }}
         else
           err -> {:error, err}
         end
@@ -139,6 +190,12 @@ defmodule Frank.Compiler do
     Enum.reduce(ind.constrs, defs, fn {idx, name, ty}, acc ->
       term = make_constr_term(idx, ind, ty, [])
       Map.put(acc, name, term)
+    end)
+  end
+
+  defp add_constructors_to_ctx(ind, ctx) do
+    Enum.reduce(ind.constrs, ctx, fn {_, name, ty}, acc ->
+      [{name, ty} | acc]
     end)
   end
 

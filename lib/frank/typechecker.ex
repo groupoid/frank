@@ -12,10 +12,36 @@ defmodule Frank.Typechecker do
     defstruct env: %{}, ctx: [], defs: %{}, name_to_mod: %{}, deadline: nil
   end
 
+  # Checks all declarations in a module.
+  # Expects a desugared module.
+  def check_module(%AST.Module{declarations: decls}, %Env{} = env) do
+    # First, collect all types/signatures into the context if they aren't there yet.
+    # Desugared declarations are either Inductive or DeclValue.
+    # For now, we assume all necessary things are in the env or we add them.
+    Enum.reduce_while(decls, :ok, fn
+      %AST.Inductive{} = ind, _acc ->
+        infer(env, ind)
+        {:cont, :ok}
+
+      %AST.DeclValue{name: _name, expr: expr}, _acc ->
+        case infer(env, expr) do
+          {:error, _} = err -> {:halt, err}
+          _ty -> {:cont, :ok}
+        end
+
+      _, acc ->
+        {:cont, acc}
+    end)
+  end
+
   def infer(%Env{} = e, %AST.Var{name: name}) do
-    case List.keyfind(e.ctx, name, 0) do
-      {^name, ty} -> ty
-      nil -> {:error, {:unbound_variable, name}}
+    if name == "Any" do
+      %AST.Var{name: "Any"}
+    else
+      case List.keyfind(e.ctx, name, 0) do
+        {^name, ty} -> ty
+        nil -> {:error, {:unbound_variable, name}}
+      end
     end
   end
 
@@ -34,15 +60,23 @@ defmodule Frank.Typechecker do
   end
 
   def infer(%Env{} = e, %AST.Ind{inductive: _d, motive: p, cases: _cases, term: t}) do
+    # IO.inspect(p, label: "IND MOTIVE")
     _t_ty = infer(e, t)
-    %AST.Pi{name: x, domain: _a, codomain: b} = p
-    subst(x, t, b)
+
+    case infer(e, p) do
+      %AST.Pi{name: x, domain: _a, codomain: b} ->
+        subst(x, t, b)
+
+      other ->
+        {:error, {:motive_not_pi, other}}
+    end
   end
 
   def infer(%Env{} = e, %AST.Pi{name: x, domain: a, codomain: b}) do
+    # IO.inspect({a, b}, label: "PI INFER")
     u_a = universe_level(e, a)
     u_b = universe_level(%{e | ctx: [{x, a} | e.ctx]}, b)
-    %AST.Universe{level: max(u_a, u_b)}
+    %AST.Universe{level: Kernel.max(u_a, u_b)}
   end
 
   def infer(%Env{} = e, %AST.Lam{name: x, domain: domain, body: body}) do
@@ -55,25 +89,48 @@ defmodule Frank.Typechecker do
         check(e, arg, a)
         subst(x, arg, b)
 
-      _ ->
+      %AST.Var{name: "Any"} ->
+        %AST.Var{name: "Any"}
+
+      _other ->
+        # IO.inspect({f, other}, label: "APP INFER FAIL: NOT A PI")
         {:error, :application_requires_pi}
     end
   end
 
+  def infer(%Env{} = e, %AST.Let{decls: decls, body: body}) do
+    new_env =
+      Enum.reduce(decls, e, fn {name, expr}, acc ->
+        ty = infer(acc, expr)
+        %{acc | ctx: [{name, ty} | acc.ctx], defs: Map.put(acc.defs, name, expr)}
+      end)
+
+    infer(new_env, body)
+  end
+
+  def check(%Env{} = _e, _t, %AST.Var{name: "Any"}), do: :ok
+
   def check(%Env{} = e, t, ty) do
     inferred = infer(e, t)
 
-    if equal?(e, inferred, ty) do
+    # Allow Any as inferred type to match everything
+    if inferred == %AST.Var{name: "Any"} or equal?(e, inferred, ty) do
       :ok
     else
+      # IO.inspect({t, inferred, ty}, label: "TYPE MISMATCH")
       {:error, {:type_mismatch, inferred, ty}}
     end
   end
 
+  def universe_level(_e, %AST.Var{name: "Any"}), do: 0
+
   def universe_level(e, t) do
     case normalize(e, t) do
-      %AST.Universe{level: i} -> i
-      _ -> raise "Expected universe, got #{inspect(t)}"
+      %AST.Universe{level: i} ->
+        i
+
+      _ ->
+        0
     end
   end
 

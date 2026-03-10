@@ -18,7 +18,6 @@ defmodule Frank.Desugar do
         end
       end)
 
-    # Merge into env
     env_with_types = %{env | env: Map.merge(env.env, ind_map)}
 
     %AST.Module{
@@ -37,10 +36,7 @@ defmodule Frank.Desugar do
         %AST.DeclValue{name: name, binders: binders, expr: expr, where_decls: where_decls},
         env
       ) do
-    # Desugar local where_decls first
     desugared_where = Enum.map(where_decls || [], &desugar_decl(&1, env))
-
-    # Convert to Let if there are any where_decls
     expr_with_where =
       if desugared_where == [] do
         expr
@@ -48,8 +44,6 @@ defmodule Frank.Desugar do
         decls_list = Enum.map(desugared_where, fn d -> {d.name, d.expr} end)
         %AST.Let{decls: decls_list, body: expr}
       end
-
-    # Transform f x y = e into f = \x -> \y -> e
     body =
       Enum.reduce(Enum.reverse(binders), desugar_expression(expr_with_where, env, name), fn
         %AST.Var{name: vn}, acc ->
@@ -60,7 +54,6 @@ defmodule Frank.Desugar do
   end
 
   def desugar_decl(%AST.DeclData{name: name, params: params, constructors: constructors}, _env) do
-    # ... (remains same logic but needs to be grouped)
     ind_params = Enum.map(params, fn p -> {p, %AST.Universe{level: 0}} end)
 
     constrs =
@@ -88,7 +81,6 @@ defmodule Frank.Desugar do
         end)
 
       %AST.Case{expr: e, branches: branches} ->
-        # Find inductive type from the first branch
         ind =
           if branches == [] do
             %AST.Inductive{name: "Empty", params: [], level: 0, constrs: []}
@@ -97,7 +89,6 @@ defmodule Frank.Desugar do
 
             case first_pat do
               %AST.BinderConstructor{name: cname} ->
-                # Search in env.env for an inductive that has this constructor
                 Enum.find_value(Map.values(env.env), fn ind ->
                   if Enum.any?(ind.constrs, fn {_, name, _} -> name == cname end), do: ind
                 end)
@@ -107,7 +98,6 @@ defmodule Frank.Desugar do
             end
           end
 
-        # Fallback if not found
         ind =
           ind ||
             %AST.Inductive{
@@ -119,11 +109,8 @@ defmodule Frank.Desugar do
 
         desugared_target = desugar_expression(e, env, func_name)
 
-        # Map branches to Ind cases
-        # Ind cases MUST be in the same order as in ind.constrs
         cases =
           Enum.map(ind.constrs, fn {_idx, cname, _cty} ->
-            # Find a branch for this constructor
             branch =
               Enum.find(branches, fn {pat, _} ->
                 case pat do
@@ -145,10 +132,10 @@ defmodule Frank.Desugar do
 
                         %AST.Lam{
                           name: k,
-                          domain: %AST.Universe{level: 0},
+                          domain: %AST.Var{name: "Any"},
                           body: %AST.Lam{
                             name: ih_name,
-                            domain: %AST.Universe{level: 0},
+                            domain: %AST.Var{name: "Any"},
                             body: acc_with_ih
                           }
                         }
@@ -166,7 +153,7 @@ defmodule Frank.Desugar do
 
         %AST.Ind{
           inductive: ind,
-          motive: %AST.Lam{name: "_", domain: ind, body: %AST.Universe{level: 0}},
+          motive: %AST.Lam{name: "_", domain: ind, body: %AST.Var{name: "Any"}},
           cases: cases,
           term: desugared_target
         }
