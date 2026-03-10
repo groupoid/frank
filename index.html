@@ -114,7 +114,6 @@ type term =
 
             <h3>Syntactic Equality</h3>
             <p>
-            Structural equality of terms under an environment and context.
             The function <b>equal</b> implements judgmental equality with substitution to
             handle bound variables, avoiding explicit α-conversion by assuming
             fresh names (a simplification over full de Bruijn indices [3]). The
@@ -125,7 +124,7 @@ type term =
                Resursive Cases: App (f, arg) requires equality of function and argument. Pi (x, a, b) compares domains and codomains, adjusting for variable renaming via substitution. Inductive d checks name, level, and parameters. Constr and Elim compare indices, definitions, and arguments/cases.
                Default: Returns false for mismatched constructors.</p>
 
-            <p>Theorem. Equality is reflexive, symmetric, and transitive modulo α-equivalence (cf. [1], Section 2).
+            <p><b>Theorem 1</b>. Equality is reflexive, symmetric, and transitive modulo α-equivalence (cf. [1], Section 2).
                For Pi (x, a, b) and Pi (y, a', b'), equality holds if a = a' and b[x := Var x] = b'[y := Var x],
                ensuring capture-avoiding substitution preserves meaning.</p>
             </div>
@@ -137,7 +136,7 @@ type term =
                Searches ctx for (x, ty) using List.assoc.
                Returns Some ty if found, None otherwise.</p>
 
-            <p>Theorem: Context lookup is well-defined under uniqueness of names (cf. [1], Section 3).
+            <p><b>Theorem 2</b>: Context lookup is well-defined under uniqueness of names (cf. [1], Section 3).
                If ctx = Γ, x : A, Δ, then lookup_var ctx x = Some A.</p>
 
             </div>
@@ -147,8 +146,8 @@ type term =
             <p>The function <b>subst</b> substitutes a term s for variable x in term t. Substitutions are morphisms in Substitution categorties.</p>
             <p>The capture-avoiding check if x = y prevents variable capture but assumes distinct bound names, a simplification over full
                renaming or de Bruijn indices. For Elim, substituting in the motive and cases ensures recursive definitions remain sound,
-               aligning with CIC’s eliminator semantics. Cases:</p>
-            <p>1) Var: Replaces x with s, leaves others unchanged.
+               aligning with CIC’s eliminator semantics.</p>
+            <p><b>Theorem 3</b> Substition case analysis: 1) Var: Replaces x with s, leaves others unchanged.
                2) Pi/Lam: Skips substitution if bound variable shadows x, else recurses on domain and body.
                3) App/Constr/Elim: Recurses on subterms.
                4) Inductive: No substitution (assumes no free variables).</p>
@@ -161,7 +160,7 @@ type term =
                avoids explicit recursion, leveraging OCaml’s functional style, but assumes args are well-typed, deferring validation to infer.
                1) Validates argument count against d.params.
             2) Substitutes each parameter into constructor types using subst_param.</p>
-            <p>Theorem: Parameter application preserves inductiveness (cf. [4], Section 4).
+            <p><b>Theorem 4</b>: Parameter application preserves inductiveness (cf. [4], Section 4).
                If D is an inductive type with parameters P, then D[P] is well-formed with substituted constructors.</p>
             </div>
 
@@ -174,7 +173,7 @@ type term =
                layer by the layer, and subst x arg b updates the type for the next argument.
                1) Recursively matches ty (a Pi chain) with args, checking each argument and substituting.
                2) Returns the final type when all arguments are consumed.</p>
-            <p>Theorem. Constructor typing is preserved (cf. [1], Section 4, Application Rule; [1], Section 4.3).
+            <p><b>Theorem 5</b>. Constructor typing is preserved (cf. [1], Section 4, Application Rule; [1], Section 4.3).
                If ctx ⊢ c : Π (x:A), B and ctx ⊢ a : A, then ctx ⊢ c a : B[x := a].</p>
             </div>
 
@@ -186,7 +185,7 @@ type term =
                while compute_case_type constructs the induction principle by injecting App (p, var) as the hypothesis type for recursive
                occurrences, mirroring the fixpoint-style eliminators of CIC [1]. The flexibility in result_ty avoids hardcoding it to D,
                supporting higher-type motives (e.g., Type0).</p>
-            <p>Theorem. Elimination preserves typing (cf. [1], Section 4.5; Elimination Rule for Inductive Types).
+            <p><b>Theorem 6</b>. Elimination preserves typing (cf. [1], Section 4.5; Elimination Rule for Inductive Types).
                For an inductive type D with constructors c_j, if ctx ⊢ t : D and ctx ⊢ P : D → Type_i, and each
                case case_j has type Πx:A_j.P(c_j x) where A_j are the argument types of c_j (including recursive hypotheses),
                then ctx ⊢ Ind(D, P, cases, t) : P t.</p>
@@ -197,6 +196,7 @@ type term =
             <p>The function <b>infer</b> infers the type of term t in context ctx and environment env.</p>
             <p>For Pi and Lam, universe levels ensure consistency (e.g., Type i : Type (i + 1)), while Elim
                handles induction, critical for dependent elimination. Note that lambda agrument should be typed for easier type synthesis [13].</p>
+            <p><b>Theorem 7</b>. Type inference is sound.</p>
             </div>
 
             <div style="max-width:720px;margin:0 auto;margin-top:30px;">
@@ -204,7 +204,7 @@ type term =
             <p>The function <b>check_universe</b> ensures t is a universe, returning its level. Infers type of t, expects Universe i.</p>
             <p>This auxiliary enforces universe hierarchy, preventing paradoxes (e.g., Type : Type). It relies on infer, assuming its correctness,
                and throws errors for non-universe types, aligning with ITT’s stratification.</p>
-            <p>Theorem: Universe checking is decidable (cf. [13]). If ctx ⊢ t : Universe i, then check_universe env ctx t = i.</p>
+            <p><b>Theorem 8</b>: Universe checking is decidable (cf. [13]). If ctx ⊢ t : Universe i, then check_universe env ctx t = i.</p>
             </div>
 
             <div style="max-width:720px;margin:0 auto;margin-top:30px;">
@@ -218,7 +218,7 @@ type term =
                while the default case synthesizes via infer and compares with a normalized ty, ensuring
                definitional equality (β-reduction). Completeness hinges on normalize terminating (ITT’s
                strong normalization) and equal capturing judgmental equality.</p>
-            <p>Theorem. Type checking is complete (cf. [1], Normalization). If ctx ⊢ t : T in the type theory,
+            <p><b>Theorem 9</b>. Type checking is complete (cf. [1], Normalization). If ctx ⊢ t : T in the type theory,
                then check env ctx t T succeeds, assuming normalization and sound inference.</p>
             </div>
 
@@ -231,7 +231,7 @@ type term =
                computing ih = Elim(Nat, Π_:Nat.Nat, [m; λk.λih.succ ih], n), ensuring succ ih : Nat. The nested
                apply_term handles multi-argument lambdas (e.g., k and ih), avoiding explicit uncurrying, while
                substitution preserves typing per CIC’s rules.</p>
-            <p>Theorem. Case application is sound (cf. [1] Elimination Typing). If case : Πx:A.P(c x) and args match A,
+            <p><b>Theorem 10</b>. Case application is sound (cf. [1] Elimination Typing). If case : Πx:A.P(c x) and args match A,
                then apply_case env ctx d p cases case ty args yields a term of type P(c args).</p>
             </div>
 
@@ -249,7 +249,7 @@ type term =
                5) Elim (d, p, cases, t'): Reduces the target t'.
                6) Constr: Reduces arguments.
                7) Default: Returns unchanged.</p>
-            <p>Theorem. Reduction preserves typing (cf. [8], Normalization Lemma, Subject Reduction).
+            <p><b>Theorem 11</b>. Reduction preserves typing (cf. [8], Normalization Lemma, Subject Reduction).
                If ctx ⊢ t : T and t → t' via β-reduction or inductive elimination, then ctx ⊢ t' : T.</p>
 
             <h3>Normalization</h3>
@@ -259,7 +259,7 @@ type term =
                sequences terminate. The fixpoint iteration relies on reduce’s one-step reductions (β for lambdas, ι for
                inductives), with equal acting as the termination oracle. For plus 2 2, it steps to succ succ succ succ zero,
                terminating at a constructor form.</p>
-            <p>Theorem. Normalization terminates (cf. [1]. Strong Normalization via CIC). Every well-typed term in the system
+            <p><b>Theorem 12</b>. Normalization terminates (cf. [1]. Strong Normalization via CIC). Every well-typed term in the system
                has a ormal form under β- and ι-reductions.</p>
             </div>
 
