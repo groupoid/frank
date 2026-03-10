@@ -4,7 +4,7 @@ defmodule Frank.MixProject do
   def project do
     [
       app: :christine,
-      version: "0.3.9",
+      version: "0.3.10",
       description: "The Christine Programming Language",
       deps: deps(),
       package: package()
