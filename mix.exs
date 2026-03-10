@@ -27,7 +27,7 @@ defmodule Frank.MixProject do
       licenses: ["ISC"],
       maintainers: ["Namdak Tonpa"],
       name: :christine,
-      links: %{"GitHub" => "https://github.com/synrc/christine"}
+      links: %{"GitHub" => "https://github.com/groupoid/frank"}
     ]
   end
 
