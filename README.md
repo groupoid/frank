@@ -9,7 +9,6 @@ Frank: CoC + CIC
 constitutes a minimal core for a dependently-typed lambda calculus,
 constrained to include only inductive constructions.
 It encompasses universes, dependent products `Pi` and `Inductive` types with strict positivity enforcement.
-Recent refinements ensure totality for user-defined lambda terms via a positive occurrence check.
 Its mathematical properties, focusing on correctness, soundness, totality, canonicity, decidability and related
 attributes relevant to formal mathematics are being analyzed.
 
