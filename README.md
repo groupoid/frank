@@ -292,24 +292,6 @@ This is upheld by normalization and the absence of paradoxes such as Girard's [G
 * Formal Statement: `infer` and `check` terminate with a type or `TypeError`.
 * Status: Decidable, enhanced by termination checks on lambda expressions.
 
-## Artefact
-
-```
-https://frank.groupoid.space/
-
-  🧊 Frank CoC/CIC Theorem Prover version 0.5 (c) 2025 Groupoїd Infinity
-
-For help type `help`.
-
-Starting proof for: Π(n : Nat).Nat
-Goal 1:
-Context: []
-⊢ Π(n : Nat).Nat
-
-1 goals remaining
->
-```
-
 ## CIC
 
 [1]. Coquand, T., & Paulin-Mohring, C. Inductively defined types. 1990. <br>
@@ -332,34 +314,44 @@ Context: []
 [12]. J.-Y. Girard. Interprétation fonctionnelle et élimination des coupures. 1972. <br>
 [13]. Thierry Coquand, Gerard Huet. <a href="https://core.ac.uk/download/pdf/82038778.pdf">The Calculus of Constructions</a>. 1988.<br>
 
-## REPL
-
-The Frank REPL provides an interactive environment for evaluating expressions. You can import modules from the base library and evaluate Peano arithmetic or list operations.
+## Mix Tasks
 
 ```
-% mix frank.repl
+% mix help | grep frank
+mix frank.base            # Compile Frank standard library
+mix frank.compile         # Compile Frank files
+mix frank.repl            # Frank interactive REPL
+mix frank.test            # Run Frank tests
+```
+
+```
+$ mix frank.base
+Compiling Frank base library...
+  Compiling priv/frank/Prelude.frank... OK
+  Compiling priv/frank/Data/Unit.frank... OK
+  Compiling priv/frank/Data/Bool.frank... OK
+  Compiling priv/frank/Data/Nat.frank... OK
+  Compiling priv/frank/Data/List.frank... OK
+  Compiling priv/frank/Data/Tree.frank... OK
+  Compiling priv/frank/Data/Fin.frank... OK
+  Compiling priv/frank/Data/Vec.frank... OK
+  Compiling priv/frank/Data/W.frank... OK
+Frank base library compilation finished.
+```
+## REPL
+
+```
+$ mix frank.repl
 Frank REPL (simplified)
-
-frank> import Prelude
-OK
-
-frank> import Data.Nat
-OK
-
-frank> plus (Succ Zero) (Succ (Succ Zero))
-Result: Succ (Succ (Succ Zero))
-
-frank> mult (Succ (Succ Zero)) (Succ (Succ Zero))
-Result: Succ (Succ (Succ (Succ Zero)))
-
-frank> import Data.List
-OK
-
-frank> length (Cons (Succ Zero) Nil)
-Result: Succ Zero
-
-frank> append (Cons Zero Nil) (Cons (Succ Zero) Nil)
-Result: Cons Zero (Cons (Succ Zero) Nil)
+frank> test_W
+Result: (Sup True (\u -> wplus ((\u -> succ_w zero_w) tt) wOne))
+frank> test_foldr
+Result: (Succ ((Succ ((Succ ((Zero (\m -> \n -> ind_Nat(m)) Zero
+((Zero (\m -> \n -> ind_Nat(m)) Zero)))) ((Zero (\m -> \n ->
+ind_Nat(m)) Zero)))) (\m -> \n -> ind_Nat(m)) Zero ((Succ ((Succ
+((Zero (\m -> \n -> ind_Nat(m)) Zero ((Zero (\m -> \n ->
+ind_Nat(m)) Zero)))) ((Zero (\m -> \n -> ind_Nat(m)) Zero))))
+(\m -> \n -> ind_Nat(m)) Zero)))))
 ```
 
 ## Author
