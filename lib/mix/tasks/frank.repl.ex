@@ -5,7 +5,10 @@ defmodule Mix.Tasks.Frank.Repl do
 
   @shortdoc "Frank interactive REPL"
   def run(_) do
-    IO.puts("Frank REPL (simplified)")
+    IO.puts("🧊 Frank Programming Language version 0.3.11 [Miranda Syntax]\n" <>
+            "Copyright (c) 2016-2026 Groupoid Infinity\n" <>
+            "https://groupoid.github.io/frank/\n"
+            )
     env = %Typechecker.Env{}
 
     # Auto-load all modules from priv/frank and test/frank
